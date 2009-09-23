@@ -1,49 +1,48 @@
 require File.join(File.dirname(__FILE__), "test_helper")
 
 class TestFakeAuthentication < Test::Unit::TestCase
-  def setup
-    FakeWeb.register_uri('http://user:pass@mock/auth.txt', :string => 'authorized')
-    FakeWeb.register_uri('http://user2:pass@mock/auth.txt', :string => 'wrong user')
-    FakeWeb.register_uri('http://mock/auth.txt', :string => 'unauthorized')
-  end
 
   def test_register_uri_with_authentication
-    FakeWeb.register_uri('http://user:pass@mock/test_example.txt', :string => "example")
-    assert FakeWeb.registered_uri?('http://user:pass@mock/test_example.txt')
+    FakeWeb.register_uri(:get, 'http://user:pass@mock/test_example.txt', :body => "example")
+    assert FakeWeb.registered_uri?(:get, 'http://user:pass@mock/test_example.txt')
   end
 
   def test_register_uri_with_authentication_doesnt_trigger_without
-    FakeWeb.register_uri('http://user:pass@mock/test_example.txt', :string => "example")
-    assert !FakeWeb.registered_uri?('http://mock/test_example.txt')
+    FakeWeb.register_uri(:get, 'http://user:pass@mock/test_example.txt', :body => "example")
+    assert !FakeWeb.registered_uri?(:get, 'http://mock/test_example.txt')
   end
 
   def test_register_uri_with_authentication_doesnt_trigger_with_incorrect_credentials
-    FakeWeb.register_uri('http://user:pass@mock/test_example.txt', :string => "example")
-    assert !FakeWeb.registered_uri?('http://user:wrong@mock/test_example.txt')
+    FakeWeb.register_uri(:get, 'http://user:pass@mock/test_example.txt', :body => "example")
+    assert !FakeWeb.registered_uri?(:get, 'http://user:wrong@mock/test_example.txt')
   end
 
   def test_unauthenticated_request
+    FakeWeb.register_uri(:get, 'http://mock/auth.txt', :body => 'unauthorized')
     http = Net::HTTP.new('mock', 80)
     req = Net::HTTP::Get.new('/auth.txt')
-    assert_equal http.request(req).body, 'unauthorized'
+    assert_equal 'unauthorized', http.request(req).body
   end
 
   def test_authenticated_request
+    FakeWeb.register_uri(:get, 'http://user:pass@mock/auth.txt', :body => 'authorized')
     http = Net::HTTP.new('mock',80)
     req = Net::HTTP::Get.new('/auth.txt')
     req.basic_auth 'user', 'pass'
-    assert_equal http.request(req).body, 'authorized'
+    assert_equal 'authorized', http.request(req).body
   end
 
-  def test_incorrectly_authenticated_request
-    http = Net::HTTP.new('mock',80)
+  def test_authenticated_request_where_only_userinfo_differs
+    FakeWeb.register_uri(:get, 'http://user:pass@mock/auth.txt', :body => 'first user')
+    FakeWeb.register_uri(:get, 'http://user2:pass@mock/auth.txt', :body => 'second user')
+    http = Net::HTTP.new('mock')
     req = Net::HTTP::Get.new('/auth.txt')
     req.basic_auth 'user2', 'pass'
-    assert_equal http.request(req).body, 'wrong user'
+    assert_equal 'second user', http.request(req).body
   end
 
   def test_basic_auth_support_is_transparent_to_oauth
-    FakeWeb.register_uri(:get, "http://sp.example.com/protected", :string => "secret")
+    FakeWeb.register_uri(:get, "http://sp.example.com/protected", :body => "secret")
 
     # from http://oauth.net/core/1.0/#auth_header
     auth_header = <<-HEADER
@@ -65,4 +64,29 @@ class TestFakeAuthentication < Test::Unit::TestCase
     end
     assert_equal "secret", response.body
   end
+
+  def test_basic_auth_when_userinfo_contains_allowed_unencoded_characters
+    FakeWeb.register_uri(:get, "http://roses&hel1o,(+$):so;longs=@example.com", :body => "authorized")
+    http = Net::HTTP.new("example.com")
+    request = Net::HTTP::Get.new("/")
+    request.basic_auth("roses&hel1o,(+$)", "so;longs=")
+    assert_equal "authorized", http.request(request).body
+  end
+
+  def test_basic_auth_when_userinfo_contains_encoded_at_sign
+    FakeWeb.register_uri(:get, "http://user%40example.com:secret@example.com", :body => "authorized")
+    http = Net::HTTP.new("example.com")
+    request = Net::HTTP::Get.new("/")
+    request.basic_auth("user@example.com", "secret")
+    assert_equal "authorized", http.request(request).body
+  end
+
+  def test_basic_auth_when_userinfo_contains_allowed_encoded_characters
+    FakeWeb.register_uri(:get, "http://us%20er:sec%20%2F%2Fret%3F@example.com", :body => "authorized")
+    http = Net::HTTP.new("example.com")
+    request = Net::HTTP::Get.new("/")
+    request.basic_auth("us er", "sec //ret?")
+    assert_equal "authorized", http.request(request).body
+  end
+
 end

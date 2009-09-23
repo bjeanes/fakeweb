@@ -6,8 +6,12 @@ require 'fake_web/response'
 require 'fake_web/responder'
 require 'fake_web/stub_socket'
 require 'fake_web/url_encoded_pair_parser'
+require 'fake_web/utility'
 
 module FakeWeb
+
+  # Returns the version string for the copy of FakeWeb you have loaded.
+  VERSION = File.read(File.join(File.dirname(__FILE__), "..", "VERSION")).strip
 
   # Resets the FakeWeb Registry. This will force all subsequent web requests to
   # behave as real requests.
@@ -46,26 +50,30 @@ module FakeWeb
   # stubbed.
   class NetConnectNotAllowedError < StandardError; end;
 
+  # This exception is raised if a Net::HTTP request matches more than one of
+  # the stubs you've registered. To fix the problem, remove a duplicate
+  # registration or disambiguate any regular expressions by making them more
+  # specific.
+  class MultipleMatchingURIsError < StandardError; end;
+
   # call-seq:
   #   FakeWeb.register_uri(method, uri, options)
-  #   FakeWeb.register_uri(uri, options)
   #
-  # Register requests using the HTTP method specified by the symbol +method+ for
-  # +uri+ to be handled according to +options+. If no +method+ is specified, or
-  # you explicitly specify <tt>:any</tt>, the response will be reigstered for
-  # any request for +uri+. +uri+ can be a +String+ or a +URI+ object. +options+
-  # must be either a +Hash+ or an +Array+ of +Hashes+ (see below) that must
-  # contain any one of the following keys:
+  # Register requests using the HTTP method specified by the symbol +method+
+  # for +uri+ to be handled according to +options+. If you specify the method
+  # <tt>:any</tt>, the response will be reigstered for any request for +uri+.
+  # +uri+ can be a +String+, +URI+, or +Regexp+ object. +options+ must be either
+  # a +Hash+ or an +Array+ of +Hashes+ (see below), which must contain one of
+  # these two keys:
   #
-  # <tt>:string</tt>::
-  #   Takes a +String+ argument that is returned as the body of the response.
-  #     FakeWeb.register_uri(:get, 'http://example.com/', :string => "Hello World!")
-  # <tt>:file</tt>::
-  #   Takes a valid filesystem path to a file that is slurped and returned as
-  #   the body of the response.
-  #     FakeWeb.register_uri(:post, 'http://example.com/', :file => "/tmp/my_response_body.txt")
+  # <tt>:body</tt>::
+  #   A string which is used as the body of the response. If the string refers
+  #   to a valid filesystem path, the contents of that file will be read and used
+  #   as the body of the response instead. (This used to be two options,
+  #   <tt>:string</tt> and <tt>:file</tt>, respectively. These are now deprecated.)
   # <tt>:response</tt>:: 
-  #   Either an <tt>Net::HTTPResponse</tt>, an +IO+ or a +String+.
+  #   Either an <tt>Net::HTTPResponse</tt>, an +IO+, or a +String+ which is used
+  #   as the full response for the request.
   # 
   #   The easier way by far is to pass the <tt>:response</tt> option to
   #   +register_uri+ as a +String+ or an (open for reads) +IO+ object which
@@ -86,9 +94,9 @@ module FakeWeb
   #   documentation[http://ruby-doc.org/stdlib/libdoc/net/http/rdoc/classes/Net/HTTPResponse.html]
   #   for more information on creating custom response objects.
   # 
-  # +options+ may also be an +Array+ containing a list of the above-described +Hash+.
-  # In this case, FakeWeb will rotate through each provided response, you may optionally
-  # provide:
+  # +options+ may also be an +Array+ containing a list of the above-described
+  # +Hash+. In this case, FakeWeb will rotate through each provided response,
+  # you may optionally provide:
   #
   # <tt>:times</tt>::
   #   The number of times this response will be used. Decremented by one each time it's called.
@@ -100,55 +108,71 @@ module FakeWeb
   #   Passing <tt>:status</tt> as a two-value array will set the response code
   #   and message. The defaults are <tt>200</tt> and <tt>OK</tt>, respectively.
   #   Example:
-  #     FakeWeb.register_uri('http://www.example.com/', :response => "Go away!", :status => [ 404, "Not Found" ])
+  #     FakeWeb.register_uri("http://www.example.com/", :body => "Go away!", :status => [404, "Not Found"])
   # <tt>:exception</tt>::
   #   The argument passed via <tt>:exception</tt> will be raised when the
   #   specified URL is requested. Any +Exception+ class is valid. Example:
   #     FakeWeb.register_uri('http://www.example.com/', :exception => Net::HTTPError)
   #
+  # If you're using the <tt>:body</tt> response type, you can pass additional
+  # options to specify the HTTP headers to be used in the response. Example:
+  #
+  #   FakeWeb.register_uri(:get, "http://example.com/index.txt", :body => "Hello", :content_type => "text/plain")
   def self.register_uri(*args, &block)
-    method = :any
     case args.length
-    when 3 then method, uri, options = *args
-    when 2 then         uri, options = *args
-    else raise ArgumentError.new("wrong number of arguments (#{args.length} for method = :any, uri, options)")
+    when 3
+      Registry.instance.register_uri(*args, &block)
+    when 2
+      print_missing_http_method_deprecation_warning(*args)
+      Registry.instance.register_uri(:any, *args, &block)
+    else
+      raise ArgumentError.new("wrong number of arguments (#{args.length} for 3)")
     end
-
-    Registry.instance.register_uri(method, uri, options, &block)
   end
 
   # call-seq:
   #   FakeWeb.response_for(method, uri)
-  #   FakeWeb.response_for(uri)
   #
-  # Returns the faked Net::HTTPResponse object associated with +uri+.
-  def self.response_for(request, *args, &block) #:nodoc: :yields: response
-    method = :any
+  # Returns the faked Net::HTTPResponse object associated with +method+ and +uri+.
+  def self.response_for(*args, &block) #:nodoc: :yields: response
     case args.length
-    when 2 then method, uri = args
-    when 1 then         uri = args.first
-    else   raise ArgumentError.new("wrong number of arguments (#{args.length} for method = :any, uri)")
+    when 2
+      Registry.instance.response_for(*args, &block)
+    when 1
+      print_missing_http_method_deprecation_warning(*args)
+      Registry.instance.response_for(:any, *args, &block)
+    else
+      raise ArgumentError.new("wrong number of arguments (#{args.length} for 2)")
     end
-
-    Registry.instance.response_for(request, method, uri, &block)
   end
 
   # call-seq:
   #   FakeWeb.registered_uri?(method, uri)
-  #   FakeWeb.registered_uri?(uri)
   #
-  # Returns true if +uri+ is registered with FakeWeb. You can optionally
-  # specify +method+ to limit the search to a certain HTTP method (or use
-  # <tt>:any</tt> to explicitly check against any method).
+  # Returns true if a +method+ request for +uri+ is registered with FakeWeb.
+  # Specify a method of <tt>:any</tt> to check for against all HTTP methods.
   def self.registered_uri?(*args)
-    method = :any
     case args.length
-    when 2 then method, uri = args
-    when 1 then         uri = args.first
-    else   raise ArgumentError.new("wrong number of arguments (#{args.length} for method = :any, uri)")
+    when 2
+      Registry.instance.registered_uri?(*args)
+    when 1
+      print_missing_http_method_deprecation_warning(*args)
+      Registry.instance.registered_uri?(:any, *args)
+    else
+      raise ArgumentError.new("wrong number of arguments (#{args.length} for 2)")
     end
-
-    Registry.instance.registered_uri?(method, uri)
   end
 
+
+  private
+
+  def self.print_missing_http_method_deprecation_warning(*args)
+    method = caller.first.match(/`(.*?)'/)[1]
+    new_args = args.map { |a| a.inspect }.unshift(":any")
+    new_args.last.gsub!(/^\{|\}$/, "").gsub!("=>", " => ") if args.last.is_a?(Hash)
+    $stderr.puts
+    $stderr.puts "Deprecation warning: FakeWeb requires an HTTP method argument (or use :any). Try this:"
+    $stderr.puts "  FakeWeb.#{method}(#{new_args.join(', ')})"
+    $stderr.puts "Called at #{caller[1]}"
+  end
 end

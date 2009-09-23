@@ -15,7 +15,7 @@ module Net  #:nodoc: all
       when Socket, OpenSSL::SSL::SSLSocket, IO
         io
       when String
-        if !io.include?("\0") && File.exists?(io)
+        if !io.include?("\0") && File.exists?(io) && !File.directory?(io)
           File.open(io, "r")
         else
           StringIO.new(io)
@@ -41,7 +41,8 @@ module Net  #:nodoc: all
       path = URI.parse(request.path).request_uri if request.path =~ /^http/
 
       if request["authorization"] =~ /^Basic /
-        userinfo = request["authorization"].sub(/^Basic /, "").unpack("m").first + "@"
+        userinfo = FakeWeb::Utility.decode_userinfo_from_header(request["authorization"])
+        userinfo = FakeWeb::Utility.encode_unsafe_chars_in_userinfo(userinfo) + "@"
       else
         userinfo = ""
       end
@@ -52,11 +53,12 @@ module Net  #:nodoc: all
       if FakeWeb.registered_uri?(method, uri)
         @socket = Net::HTTP.socket_type.new
         request.body = body if body
-        FakeWeb.response_for(request, method, uri, &block)
+        FakeWeb.response_for(method, uri, &block)
       elsif FakeWeb.allow_net_connect?
         connect_without_fakeweb
         request_without_fakeweb(request, body, &block)
       else
+        uri = FakeWeb::Utility.strip_default_port_from_uri(uri)
         raise FakeWeb::NetConnectNotAllowedError,
               "Real HTTP connections are disabled. Unregistered request: #{request.method} #{uri}"
       end

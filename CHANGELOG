@@ -1,4 +1,55 @@
-fakeweb (development)
+fakeweb (1.2.6)
+
+* fix that query params in a regex would have to be sorted for it to ever match
+  a request URI [Chris Kampmeier, Ben Hall]
+
+* improve regex handling so registration with an explicit port (like
+  /example.com:80/) matches a request that uses an implied port
+  (like "http://example.com/") [Chris Kampmeier, Dan Dofter]
+
+* refactor URI registry to reduce duplication; now about twice as fast at
+  handling requests [Chris Kampmeier]
+
+* Add FakeWeb::VERSION so you can programmatically determine what version of
+  FakeWeb is loaded without using RubyGems [Chris Kampmeier, Chris Wanstrath]
+
+
+fakeweb (1.2.5)
+
+* fix handling of userinfo strings that contain percent-encoded unsafe
+  characters [Chris Kampmeier, Ken Mayer]
+
+* fix that exact matches against strings/URIs with the :any method had a lower
+  precedence than regex matches using a real HTTP method (exact matches now
+  always take precedence) [Chris Kampmeier]
+
+* change request handling to raise an exception when more than one registered
+  regex matches a request URI [Chris Kampmeier]
+
+
+fakeweb (1.2.4)
+
+* add experimental support for matching URIs via regular expressions
+  [Jacqui Maher, Tiago Albineli Motta, Peter Wagene]
+
+* fix an exception when registering with the :response option and a string that
+  is the same as the name of a directory in the current path [Chris Kampmeier]
+
+* DEPRECATION: Calling FakeWeb.register_uri with a :string or :file option is
+  now deprecated. Both options have been replaced with a unified :body option,
+  since they supply the response body (as opposed to :response, which supplies
+  the full response including headers) [Chris Kampmeier]
+
+* add support for specifying HTTP headers as options to FakeWeb.register_uri
+  when using the :string or :file response types, since those methods only
+  specify a response body [David Michael, Chris Kampmeier]
+
+* DEPRECATION: Calling FakeWeb.register_uri and FakeWeb.registered_uri? without
+  an HTTP method as the first argument is now deprecated. To match against any
+  HTTP method (the pre-1.2.0 behavior), use :any [Chris Kampmeier]
+
+
+fakeweb (1.2.3)
 
 * fix the #http_version of :file and :string responses, which was returning the
   request URI instead of something sensible like "1.0" [Chris Kampmeier]

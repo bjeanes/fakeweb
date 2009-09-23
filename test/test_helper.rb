@@ -6,7 +6,32 @@ require 'fake_web'
 require 'rubygems'
 require 'mocha'
 
+
+# Give all tests a common setup and teardown that prevents shared state
+class Test::Unit::TestCase
+  alias setup_without_fakeweb setup
+  def setup
+    FakeWeb.clean_registry
+    @original_allow_net_connect = FakeWeb.allow_net_connect?
+    FakeWeb.allow_net_connect = false
+  end
+
+  alias teardown_without_fakeweb teardown
+  def teardown
+    FakeWeb.allow_net_connect = @original_allow_net_connect
+  end
+end
+
+
 module FakeWebTestHelper
+
+  def capture_stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.rewind && $stderr.read
+  ensure
+    $stderr = STDERR
+  end
 
   # Sets several expectations (using Mocha) that a real HTTP request makes it
   # past FakeWeb to the socket layer. You can use this when you need to check
@@ -32,7 +57,6 @@ module FakeWebTestHelper
     request_parts = ["#{options[:method]} #{options[:path]} HTTP/1.1", "Host: #{options[:host]}"]
     socket.expects(:write).with(all_of(includes(request_parts[0]), includes(request_parts[1]))).returns(100)
 
-    # TODO: handle long response bodies that use more than one #sysread call
     socket.expects(:sysread).at_least_once.returns("HTTP/1.1 #{options[:response_code]} #{options[:response_message]}\nContent-Length: #{options[:response_body].length}\n\n#{options[:response_body]}").then.raises(EOFError)
   end
 
